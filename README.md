@@ -1,6 +1,7 @@
 # bitcask-kv-go
 
-本仓库是 [Bitcask](https://riak.com/assets/bitcask-intro.pdf) 键值存储模型的一个 Go 语言实现。
+论文：[A Log-Structured Hash Table for Fast Key/Value Data](https://riak.com/assets/bitcask-intro.pdf)
+本仓库是Bitcask键值存储模型的一个 Go 语言实现。
 
 Bitcask 是一种基于日志结构（Log-Structured）的哈希表，专为快速的键值数据读写而设计。它的核心思想是将所有写操作都以追加（Append-only）的方式写入文件，从而获得极高的写入性能。
 
@@ -75,7 +76,3 @@ make test
 # 运行所有测试并开启竞态检测器（推荐）
 make test-race
 ```
-
-## 📜 论文参考
-
-Bitcask: A Log-Structured Hash Table for Fast Key/Value Data
