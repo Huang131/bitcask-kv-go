@@ -1,11 +1,20 @@
 package data
 
+import (
+	"encoding/binary"
+	"hash/crc32"
+)
+
 type LogRecordType = byte
 
 const (
 	LogRecordNormal LogRecordType = iota
 	LogRecordDeleted
 )
+
+// crc type keySize valueSize
+// 4 +  1  +  5   +   5 = 15
+const maxLogRecordHeaderSize = binary.MaxVarintLen32*2 + 5
 
 // LogRecord 写入到数据文件的记录
 // 数据文件中的数据是追加写入的，类似日志的格式
@@ -15,13 +24,88 @@ type LogRecord struct {
 	Type  LogRecordType
 }
 
+// LogRecord 的头部信息
+// | crc (4字节) | type (1字节) | keySize (变长) | valueSize (变长) | key (N字节) | value (M字节)
+type logRecordHeader struct {
+	crc        uint32        // crc 校验值
+	recordType LogRecordType // 标识 LogRecord 的类型
+	keySize    int64         // key 的长度
+	valueSize  int64         // value 的长度
+}
+
 // 数据内存索引，主要是描述数据在磁盘上的位置
 type LogRecordPos struct {
 	Fid    uint32 // 文件 id，表示将数据存储到了哪个文件当中
 	Offset int64  // 数据起始位置，表示数据在数据文件中的偏移量
 }
 
-// 对 LogRecord 进行编码，返回字节数组及长度
+//	 对 LogRecord 进行编码，返回字节数组及长度
+//		+-------------+-------------+-------------+--------------+-------------+--------------+
+//		| crc 校验值  |  type 类型   |    key size |   value size |      key    |      value   |
+//		+-------------+-------------+-------------+--------------+-------------+--------------+
+//		    4字节          1字节        变长（最大5）   变长（最大5）     变长           变长
 func EncodeLogRecord(logRecord *LogRecord) ([]byte, int64) {
-	return nil, 0
+	// 初始化一个 header 部分的字节数组
+	header := make([]byte, maxLogRecordHeaderSize)
+
+	// 第五个字节存储 Type
+	header[crc32.Size] = logRecord.Type
+	var index = crc32.Size + 1
+	// 5 字节之后，存储的是 key 和 value 的长度信息
+	// 使用变长类型，节省空间
+	index += binary.PutVarint(header[index:], int64(len(logRecord.Key)))
+	index += binary.PutVarint(header[index:], int64(len(logRecord.Value)))
+
+	var size = index + len(logRecord.Key) + len(logRecord.Value)
+	encBytes := make([]byte, size)
+
+	// 将 header 部分的内容拷贝过来
+	copy(encBytes[:index], header[:index])
+	// 将 key 和 value 数据拷贝到字节数组中
+	copy(encBytes[index:], logRecord.Key)
+	copy(encBytes[index+len(logRecord.Key):], logRecord.Value)
+
+	// 对整个 LogRecord 的数据进行 crc 校验
+	crc := crc32.ChecksumIEEE(encBytes[crc32.Size:])
+	binary.LittleEndian.PutUint32(encBytes[:crc32.Size], crc)
+
+	return encBytes, int64(size)
+}
+
+// 对字节数组中的 Header 信息进行解码
+func decodeLogRecordHeader(buf []byte) (*logRecordHeader, int64) {
+	if len(buf) <= crc32.Size {
+		return nil, 0
+	}
+
+	header := &logRecordHeader{
+		crc:        binary.LittleEndian.Uint32(buf[:4]),
+		recordType: buf[4],
+	}
+
+	var index = 5
+	// 取出实际的 key size
+	keySize, n := binary.Varint(buf[index:])
+	header.keySize = keySize
+	index += n
+
+	// 取出实际的 value size
+	valueSize, n := binary.Varint(buf[index:])
+	header.valueSize = valueSize
+	index += n
+
+	return header, int64(index)
+}
+
+func getLogRecordCRC(lr *LogRecord, header []byte) uint32 {
+	if lr == nil {
+		return 0
+	}
+
+	crc := crc32.New(crc32.IEEETable)
+	crc.Write(header)
+	crc.Write(lr.Key)
+	crc.Write(lr.Value)
+
+	return crc.Sum32()
 }

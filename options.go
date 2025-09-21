@@ -1,5 +1,7 @@
 package bitcask_kv_go
 
+import "os"
+
 type IndexerType = int8
 
 const (
@@ -22,4 +24,11 @@ type Options struct {
 
 	// 索引类型
 	IndexType IndexerType
+}
+
+var DefaultOptions = Options{
+	DirPath:      os.TempDir(),
+	DataFileSize: 256 * 1024 * 1024, // 256MB
+	SyncWrites:   false,
+	IndexType:    BTree,
 }
