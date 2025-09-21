@@ -32,7 +32,10 @@ func (bt *BTree) Put(key []byte, pos *data.LogRecordPos) bool {
 
 func (bt *BTree) Get(key []byte) *data.LogRecordPos {
 	it := &Item{key: key}
+	// 读锁，阻塞写操作
+	bt.lock.RLock()
 	btreeItem := bt.tree.Get(it)
+	bt.lock.RUnlock()
 	if btreeItem == nil {
 		return nil
 	}

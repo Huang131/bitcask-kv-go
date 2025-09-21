@@ -2,6 +2,8 @@ package index
 
 import (
 	"bitcask-kv-go/data"
+	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -48,4 +50,60 @@ func TestBTree_Delete(t *testing.T) {
 	assert.True(t, res3)
 	res4 := bt.Delete([]byte("aaa"))
 	assert.True(t, res4)
+}
+
+// TestBTree_Concurrent 是一个并发测试用例
+// 运行此测试的最佳方式是使用 -race 标志: go test -race -run ^TestBTree_Concurrent$
+func TestBTree_Concurrent(t *testing.T) {
+	t.Parallel() // 允许此测试与其他测试并行运行
+	bt := NewBTree()
+	wg := new(sync.WaitGroup)
+	const n = 2000 // 增加并发操作的数量
+
+	// --- 阶段一：并发写入 ---
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			key := []byte("key-" + strconv.Itoa(i))
+			pos := &data.LogRecordPos{Fid: uint32(i), Offset: int64(i)}
+			bt.Put(key, pos)
+		}(i)
+	}
+	wg.Wait() // 等待所有写入操作完成
+
+	// --- 阶段二：并发读取和删除 ---
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			key := []byte("key-" + strconv.Itoa(i))
+
+			// 尝试读取
+			pos := bt.Get(key)
+			if pos != nil {
+				// 如果能读到，值必须是正确的
+				assert.Equal(t, uint32(i), pos.Fid, "value should be correct for key %s", key)
+				assert.Equal(t, int64(i), pos.Offset, "value should be correct for key %s", key)
+			}
+
+			// 尝试删除 (偶数 key)
+			if i%2 == 0 {
+				bt.Delete(key)
+			}
+		}(i)
+	}
+
+	wg.Wait() // 等待所有读取和删除操作完成
+
+	// --- 阶段三：最终校验 ---
+	for i := 0; i < n; i++ {
+		key := []byte("key-" + strconv.Itoa(i))
+		pos := bt.Get(key)
+		if i%2 == 0 {
+			assert.Nil(t, pos, "even key %s should have been deleted", key)
+		} else {
+			assert.NotNil(t, pos, "odd key %s should still exist", key)
+		}
+	}
 }
