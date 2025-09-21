@@ -55,6 +55,24 @@ func Open(options Options) (*DB, error) {
 	return db, nil
 }
 
+// Close 关闭数据库实例
+func (db *DB) Close() error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	// 关闭活跃文件
+	if db.activeFile != nil {
+		if err := db.activeFile.Close(); err != nil {
+			return err
+		}
+	}
+	// 关闭旧文件
+	for _, file := range db.olderFiles {
+		_ = file.Close()
+	}
+	return nil
+}
+
 func checkOptions(options *Options) error {
 	if options.DirPath == "" {
 		return ErrDatabaseDirPathIsEmpty
@@ -78,8 +96,12 @@ func (db *DB) Put(key, value []byte) error {
 		Type:  data.LogRecordNormal,
 	}
 
-	// 追加写入到当前活跃数据文件当中
-	pos, err := db.appendLogRecord(logRecord)
+	// 加锁，保证写入和更新索引的原子性
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	// 追加写入到当前活跃数据文件
+	pos, err := db.appendLogRecordLocked(logRecord)
 	if err != nil {
 		return err
 	}
@@ -90,7 +112,6 @@ func (db *DB) Put(key, value []byte) error {
 	}
 
 	return nil
-
 }
 
 // 根据 key 读取数据
@@ -151,22 +172,23 @@ func (db *DB) Delete(key []byte) error {
 	logRecord := &data.LogRecord{Key: key, Type: data.LogRecordDeleted}
 
 	// 4. 将删除记录追加写入到数据文件
-	_, err := db.appendLogRecord(logRecord)
+	db.mu.Lock() // 加锁，防止并发删除报错ErrIndexUpdateFailed
+	_, err := db.appendLogRecordLocked(logRecord)
 	if err != nil {
+		db.mu.Unlock() // 写入失败时解锁
 		return err
 	}
-
 	// 5. 从内存索引中删除 key
-	if ok := db.index.Delete(key); !ok {
+	ok := db.index.Delete(key)
+	db.mu.Unlock()
+	if !ok {
 		return ErrIndexUpdateFailed
 	}
 	return nil
 }
 
-// 追加写数据到活跃文件中
-func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, error) {
-	db.mu.Lock()
-	defer db.mu.Unlock()
+// 追加写数据到活跃文件中（内部实现，调用前需要持有锁）
+func (db *DB) appendLogRecordLocked(logRecord *data.LogRecord) (*data.LogRecordPos, error) {
 	// 判断当前活跃数据文件是否存在，因为数据库在没有写入的时候是没有文件生成的
 	// 如果为空则初始化数据文件
 	if db.activeFile == nil {

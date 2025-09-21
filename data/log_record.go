@@ -50,7 +50,7 @@ func EncodeLogRecord(logRecord *LogRecord) ([]byte, int64) {
 
 	// 第五个字节存储 Type
 	header[crc32.Size] = logRecord.Type
-	var index = crc32.Size + 1
+	var index = crc32.Size + 1 // 4 + 1 = 5
 	// 5 字节之后，存储的是 key 和 value 的长度信息
 	// 使用变长类型，节省空间
 	index += binary.PutVarint(header[index:], int64(len(logRecord.Key)))
@@ -79,11 +79,11 @@ func decodeLogRecordHeader(buf []byte) (*logRecordHeader, int64) {
 	}
 
 	header := &logRecordHeader{
-		crc:        binary.LittleEndian.Uint32(buf[:4]),
-		recordType: buf[4],
+		crc:        binary.LittleEndian.Uint32(buf[:crc32.Size]),
+		recordType: buf[crc32.Size],
 	}
 
-	var index = 5
+	var index = crc32.Size + 1
 	// 取出实际的 key size
 	keySize, n := binary.Varint(buf[index:])
 	header.keySize = keySize
