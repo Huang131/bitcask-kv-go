@@ -313,3 +313,43 @@ func TestDB_Sync(t *testing.T) {
 	err = db.Sync()
 	assert.Nil(t, err)
 }
+
+// TestDB_ConcurrentChaos 是一个更混乱的并发测试，所有操作同时进行。
+// 主要目的是在 -race 标志下检测数据竞争。
+func TestDB_ConcurrentChaos(t *testing.T) {
+	t.Parallel()
+	db := initDB(t)
+	defer db.Close()
+
+	const numGoroutines = 20
+	const numOps = 500  // 每个协程的操作次数
+	const numKeys = 100 // 操作的 key 空间大小
+
+	wg := &sync.WaitGroup{}
+	wg.Add(numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			defer wg.Done()
+
+			for j := 0; j < numOps; j++ {
+				key := []byte(fmt.Sprintf("key-%d", j%numKeys))
+				val := utils.RandomValue(20)
+
+				// 随机选择一个操作
+				switch j % 3 {
+				case 0: // Put
+					err := db.Put(key, val)
+					assert.Nil(t, err)
+				case 1: // Get
+					_, err := db.Get(key)
+					assert.True(t, err == nil || err == ErrKeyNotFound)
+				case 2: // Delete
+					err := db.Delete(key)
+					assert.Nil(t, err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
