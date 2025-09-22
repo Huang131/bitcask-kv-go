@@ -12,44 +12,56 @@ import (
 func TestBTree_Put(t *testing.T) {
 	bt := NewBTree()
 
+	// Put a nil key should fail
 	res1 := bt.Put(nil, &data.LogRecordPos{Fid: 1, Offset: 100})
-	assert.True(t, res1)
+	assert.False(t, res1)
 
-	res2 := bt.Put([]byte("a"), &data.LogRecordPos{Fid: 1, Offset: 2})
-	assert.True(t, res2)
+	// Put an empty key should fail
+	res2 := bt.Put([]byte(""), &data.LogRecordPos{Fid: 1, Offset: 100})
+	assert.False(t, res2)
+
+	res3 := bt.Put([]byte("a"), &data.LogRecordPos{Fid: 1, Offset: 2})
+	assert.True(t, res3)
 }
 
 func TestBTree_Get(t *testing.T) {
 	bt := NewBTree()
 
-	res1 := bt.Put(nil, &data.LogRecordPos{Fid: 1, Offset: 100})
-	assert.True(t, res1)
-
+	// Get a nil key should return nil
 	pos1 := bt.Get(nil)
-	assert.Equal(t, uint32(1), pos1.Fid)
-	assert.Equal(t, int64(100), pos1.Offset)
+	assert.Nil(t, pos1)
 
+	// Put and Get a normal key
 	res2 := bt.Put([]byte("a"), &data.LogRecordPos{Fid: 1, Offset: 2})
 	assert.True(t, res2)
+	pos2 := bt.Get([]byte("a"))
+	assert.NotNil(t, pos2)
+	assert.Equal(t, int64(2), pos2.Offset)
+
+	// Replace and Get
 	res3 := bt.Put([]byte("a"), &data.LogRecordPos{Fid: 1, Offset: 3})
 	assert.True(t, res3)
-
-	pos2 := bt.Get([]byte("a"))
-	assert.Equal(t, uint32(1), pos2.Fid)
-	assert.Equal(t, int64(3), pos2.Offset)
+	pos3 := bt.Get([]byte("a"))
+	assert.NotNil(t, pos3)
+	assert.Equal(t, int64(3), pos3.Offset)
 }
 
 func TestBTree_Delete(t *testing.T) {
 	bt := NewBTree()
-	res1 := bt.Put(nil, &data.LogRecordPos{Fid: 1, Offset: 100})
-	assert.True(t, res1)
-	res2 := bt.Delete(nil)
-	assert.True(t, res2)
 
-	res3 := bt.Put([]byte("aaa"), &data.LogRecordPos{Fid: 22, Offset: 33})
-	assert.True(t, res3)
+	// Delete a nil key should fail
+	res1 := bt.Delete(nil)
+	assert.False(t, res1)
+
+	// Put and Delete a normal key
+	res2 := bt.Put([]byte("aaa"), &data.LogRecordPos{Fid: 22, Offset: 33})
+	assert.True(t, res2)
 	res4 := bt.Delete([]byte("aaa"))
 	assert.True(t, res4)
+
+	// Get the deleted key should return nil
+	pos4 := bt.Get([]byte("aaa"))
+	assert.Nil(t, pos4)
 }
 
 // TestBTree_Concurrent 是一个并发测试用例
@@ -102,4 +114,73 @@ func TestBTree_Concurrent(t *testing.T) {
 			assert.NotNil(t, pos, "odd key %s should still exist", key)
 		}
 	}
+}
+
+func TestBTree_Iterator(t *testing.T) {
+	t.Run("Empty BTree", func(t *testing.T) {
+		bt := NewBTree()
+		iter := bt.Iterator(false)
+		assert.False(t, iter.Valid())
+	})
+
+	bt := NewBTree()
+	bt.Put([]byte("ccde"), &data.LogRecordPos{Fid: 1, Offset: 10})
+	bt.Put([]byte("acee"), &data.LogRecordPos{Fid: 1, Offset: 10})
+	bt.Put([]byte("eede"), &data.LogRecordPos{Fid: 1, Offset: 10})
+	bt.Put([]byte("bbcd"), &data.LogRecordPos{Fid: 1, Offset: 10})
+
+	t.Run("Forward Iteration", func(t *testing.T) {
+		iter := bt.Iterator(false)
+		defer iter.Close()
+		expectedKeys := [][]byte{[]byte("acee"), []byte("bbcd"), []byte("ccde"), []byte("eede")}
+		var actualKeys [][]byte
+		for iter.Rewind(); iter.Valid(); iter.Next() {
+			actualKeys = append(actualKeys, iter.Key())
+		}
+		assert.Equal(t, expectedKeys, actualKeys)
+	})
+
+	t.Run("Reverse Iteration", func(t *testing.T) {
+		iter := bt.Iterator(true)
+		defer iter.Close()
+		expectedKeys := [][]byte{[]byte("eede"), []byte("ccde"), []byte("bbcd"), []byte("acee")}
+		var actualKeys [][]byte
+		for iter.Rewind(); iter.Valid(); iter.Next() {
+			actualKeys = append(actualKeys, iter.Key())
+		}
+		assert.Equal(t, expectedKeys, actualKeys)
+	})
+
+	t.Run("Forward Seek", func(t *testing.T) {
+		iter := bt.Iterator(false)
+		defer iter.Close()
+		// Seek for "cc", should find "ccde"
+		iter.Seek([]byte("cc"))
+		assert.True(t, iter.Valid())
+		assert.Equal(t, []byte("ccde"), iter.Key())
+
+		// Continue iteration
+		iter.Next()
+		assert.True(t, iter.Valid())
+		assert.Equal(t, []byte("eede"), iter.Key())
+	})
+
+	t.Run("Reverse Seek", func(t *testing.T) {
+		iter := bt.Iterator(true)
+		defer iter.Close()
+		// Seek for "cc", should find "bbcd" in reverse
+		iter.Seek([]byte("cc"))
+		assert.True(t, iter.Valid())
+		assert.Equal(t, []byte("bbcd"), iter.Key())
+
+		// Seek for "zz", should find "eede"
+		iter.Seek([]byte("zz"))
+		assert.True(t, iter.Valid())
+		assert.Equal(t, []byte("eede"), iter.Key())
+
+		// Continue iteration
+		iter.Next()
+		assert.True(t, iter.Valid())
+		assert.Equal(t, []byte("ccde"), iter.Key())
+	})
 }

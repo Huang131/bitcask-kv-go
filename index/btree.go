@@ -2,6 +2,8 @@ package index
 
 import (
 	"bitcask-kv-go/data"
+	"bytes"
+	"sort"
 	"sync"
 
 	"github.com/google/btree"
@@ -23,6 +25,9 @@ func NewBTree() *BTree {
 }
 
 func (bt *BTree) Put(key []byte, pos *data.LogRecordPos) bool {
+	if len(key) == 0 {
+		return false // 或者根据业务逻辑返回错误
+	}
 	it := &Item{key: key, pos: pos}
 	bt.lock.Lock()
 	bt.tree.ReplaceOrInsert(it)
@@ -31,6 +36,9 @@ func (bt *BTree) Put(key []byte, pos *data.LogRecordPos) bool {
 }
 
 func (bt *BTree) Get(key []byte) *data.LogRecordPos {
+	if len(key) == 0 {
+		return nil
+	}
 	it := &Item{key: key}
 	// 读锁，阻塞写操作
 	bt.lock.RLock()
@@ -51,4 +59,83 @@ func (bt *BTree) Delete(key []byte) bool {
 		return false
 	}
 	return true
+}
+
+func (bt *BTree) Size() int {
+	return bt.tree.Len()
+}
+
+func (bt *BTree) Iterator(reverse bool) Iterator {
+	if bt.tree == nil {
+		return nil
+	}
+	bt.lock.RLock()
+	defer bt.lock.RUnlock()
+	return newBTreeIterator(bt.tree, reverse)
+}
+
+// BTree 索引迭代器
+type btreeIterator struct {
+	currIndex int     // 当前遍历的下标位置
+	reverse   bool    // 是否是反向遍历
+	values    []*Item // key+位置索引信息
+}
+
+func newBTreeIterator(tree *btree.BTree, reverse bool) *btreeIterator {
+	// 创建一个长度为 0，容量为 tree.Len() 的切片，避免 nil 元素
+	values := make([]*Item, 0, tree.Len())
+	if reverse {
+		// 将所有键值对按降序加载到 values 切片中
+		tree.Descend(func(item btree.Item) bool {
+			values = append(values, item.(*Item))
+			return true
+		})
+	} else {
+		// 所有键值对按升序加载到一个切片 values 中
+		tree.Ascend(func(item btree.Item) bool {
+			values = append(values, item.(*Item))
+			return true
+		})
+	}
+	return &btreeIterator{
+		currIndex: 0,
+		reverse:   reverse,
+		values:    values,
+	}
+}
+
+func (bti *btreeIterator) Rewind() {
+	bti.currIndex = 0
+}
+
+func (bti *btreeIterator) Seek(key []byte) {
+	if bti.reverse {
+		bti.currIndex = sort.Search(len(bti.values), func(i int) bool {
+			return bytes.Compare(bti.values[i].key, key) <= 0
+		})
+	} else {
+		bti.currIndex = sort.Search(len(bti.values), func(i int) bool {
+			return bytes.Compare(bti.values[i].key, key) >= 0
+		})
+	}
+}
+
+func (bti *btreeIterator) Next() {
+	bti.currIndex += 1
+}
+
+func (bti *btreeIterator) Valid() bool {
+	return bti.currIndex < len(bti.values)
+}
+
+func (bti *btreeIterator) Key() []byte {
+	return bti.values[bti.currIndex].key
+}
+
+func (bti *btreeIterator) Value() *data.LogRecordPos {
+	return bti.values[bti.currIndex].pos
+}
+
+func (bti *btreeIterator) Close() {
+	bti.values = nil
 }

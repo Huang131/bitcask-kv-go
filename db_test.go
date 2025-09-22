@@ -1,6 +1,7 @@
 package bitcask_kv_go
 
 import (
+	"bitcask-kv-go/utils"
 	"fmt"
 	"sync"
 	"testing"
@@ -193,4 +194,122 @@ func TestDB_Restart(t *testing.T) {
 
 	_, err = db2.Get(key2)
 	assert.Equal(t, ErrKeyNotFound, err)
+}
+
+func TestDB_ListKeys(t *testing.T) {
+	db := initDB(t)
+	defer db.Close()
+
+	t.Run("empty database", func(t *testing.T) {
+		keys := db.ListKeys()
+		assert.Empty(t, keys)
+	})
+
+	t.Run("with multiple keys", func(t *testing.T) {
+		// 以乱序插入，以测试返回结果是否排序
+		assert.Nil(t, db.Put([]byte("c"), utils.RandomValue(10)))
+		assert.Nil(t, db.Put([]byte("a"), utils.RandomValue(10)))
+		assert.Nil(t, db.Put([]byte("b"), utils.RandomValue(10)))
+
+		keys := db.ListKeys()
+		assert.Equal(t, 3, len(keys))
+
+		// B-Tree 索引应该返回排序后的键
+		expectedKeys := [][]byte{
+			[]byte("a"),
+			[]byte("b"),
+			[]byte("c"),
+		}
+		assert.Equal(t, expectedKeys, keys)
+	})
+
+	t.Run("after deletion", func(t *testing.T) {
+		assert.Nil(t, db.Delete([]byte("b")))
+
+		keys := db.ListKeys()
+		assert.Equal(t, 2, len(keys))
+
+		expectedKeys := [][]byte{[]byte("a"), []byte("c")}
+		assert.Equal(t, expectedKeys, keys)
+	})
+}
+
+func TestDB_Fold(t *testing.T) {
+	db := initDB(t)
+	defer db.Close()
+
+	t.Run("empty database", func(t *testing.T) {
+		err := db.Fold(func(key []byte, value []byte) bool {
+			// This function should not be called for an empty DB
+			t.Fatal("fold function called on empty database")
+			return true
+		})
+		assert.Nil(t, err)
+	})
+
+	// Put some data
+	testData := map[string]string{
+		"a": "val-a",
+		"b": "val-b",
+		"c": "val-c",
+	}
+	for k, v := range testData {
+		assert.Nil(t, db.Put([]byte(k), []byte(v)))
+	}
+
+	t.Run("full iteration", func(t *testing.T) {
+		seen := make(map[string]string)
+		err := db.Fold(func(key []byte, value []byte) bool {
+			seen[string(key)] = string(value)
+			return true
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, testData, seen)
+	})
+
+	t.Run("early exit", func(t *testing.T) {
+		var count int
+		err := db.Fold(func(key []byte, value []byte) bool {
+			count++
+			if count == 2 {
+				return false // Stop after the second item
+			}
+			return true
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, 2, count)
+	})
+}
+
+func TestDB_Close(t *testing.T) {
+	db := initDB(t)
+	// No defer db.Close(), we are testing it manually.
+
+	err := db.Put(utils.GetTestKey(11), utils.RandomValue(20))
+	assert.Nil(t, err)
+
+	err = db.Close()
+	assert.Nil(t, err)
+
+	// After closing, operations should fail.
+	t.Run("put after close", func(t *testing.T) {
+		err = db.Put(utils.GetTestKey(22), utils.RandomValue(20))
+		assert.NotNil(t, err) // Expecting an error like "file already closed"
+	})
+
+	t.Run("get after close", func(t *testing.T) {
+		_, err = db.Get(utils.GetTestKey(11))
+		assert.NotNil(t, err)
+	})
+}
+
+func TestDB_Sync(t *testing.T) {
+	db := initDB(t)
+	defer db.Close()
+
+	err := db.Put(utils.GetTestKey(11), utils.RandomValue(20))
+	assert.Nil(t, err)
+
+	err = db.Sync()
+	assert.Nil(t, err)
 }
