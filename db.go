@@ -4,6 +4,7 @@ import (
 	"bitcask-kv-go/data"
 	"bitcask-kv-go/index"
 	"io"
+	"log"
 	"os"
 	"sort"
 	"strconv"
@@ -67,8 +68,10 @@ func (db *DB) Close() error {
 		}
 	}
 	// 关闭旧文件
-	for _, file := range db.olderFiles {
-		_ = file.Close()
+	for fid, file := range db.olderFiles {
+		if err := file.Close(); err != nil {
+			log.Printf("Failed to close older file %d: %v", fid, err)
+		}
 	}
 	return nil
 }
