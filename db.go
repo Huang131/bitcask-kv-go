@@ -163,6 +163,10 @@ func (db *DB) Delete(key []byte) error {
 		return ErrKeyIsEmpty
 	}
 
+	// 加锁，保证检查、写入、删除的原子性
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
 	// 2. 检查 key 是否存在，如果不存在，直接返回
 	if pos := db.index.Get(key); pos == nil {
 		return nil
@@ -172,16 +176,12 @@ func (db *DB) Delete(key []byte) error {
 	logRecord := &data.LogRecord{Key: key, Type: data.LogRecordDeleted}
 
 	// 4. 将删除记录追加写入到数据文件
-	db.mu.Lock() // 加锁，防止并发删除报错ErrIndexUpdateFailed
 	_, err := db.appendLogRecordLocked(logRecord)
 	if err != nil {
-		db.mu.Unlock() // 写入失败时解锁
 		return err
 	}
-	// 5. 从内存索引中删除 key
-	ok := db.index.Delete(key)
-	db.mu.Unlock()
-	if !ok {
+	// 5. 从内存索引中删除 key，并返回结果
+	if ok := db.index.Delete(key); !ok {
 		return ErrIndexUpdateFailed
 	}
 	return nil

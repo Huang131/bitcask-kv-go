@@ -68,11 +68,12 @@ func (df *DataFile) ReadLogRecord(offset int64) (*LogRecord, int64, error) {
 	}
 
 	header, headerSize := decodeLogRecordHeader(headerBuf)
-	// 下面的两个条件表示读取到了文件末尾，直接返回 EOF 错误
-	if header == nil {
+	// header 为 nil，或 headerSize 为 0，说明读取到了文件末尾
+	// keySize 和 valueSize 均为 0，说明是文件末尾的填充字节，或是被损坏的记录
+	if header == nil || headerSize == 0 {
 		return nil, 0, io.EOF
 	}
-	if header.crc == 0 && header.keySize == 0 && header.valueSize == 0 {
+	if header.keySize == 0 && header.valueSize == 0 && header.recordType != LogRecordDeleted {
 		return nil, 0, io.EOF
 	}
 
