@@ -30,9 +30,15 @@ func OpenDataFile(dirPath string, fileId uint32) (*DataFile, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	offset, err := ioManager.Size()
+	if err != nil {
+		return nil, err
+	}
+
 	return &DataFile{
 		FileId:    fileId,
-		WriteOff:  0,
+		WriteOff:  offset,
 		IoManager: ioManager,
 	}, nil
 }

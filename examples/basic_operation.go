@@ -13,19 +13,31 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	defer db.Close()
 
 	err = db.Put([]byte("name"), []byte("bitcask"))
 	if err != nil {
 		panic(err)
 	}
+
+	err = db.Put([]byte("age"), []byte("18"))
+	if err != nil {
+		panic(err)
+	}
+
 	val, err := db.Get([]byte("name"))
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("val = ", string(val))
+	fmt.Println("name = ", string(val))
 
 	err = db.Delete([]byte("name"))
 	if err != nil {
 		panic(err)
 	}
+	val, err = db.Get([]byte("age"))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("age = ", string(val))
 }
