@@ -298,7 +298,7 @@ func (db *DB) loadIndexFromDataFiles() error {
 	}
 
 	// 遍历所有的文件id，处理文件中的记录
-	for i, fid := range db.fileIds {
+	for _, fid := range db.fileIds {
 		var fileId = uint32(fid)
 		var dataFile *data.DataFile
 		if fileId == db.activeFile.FileId {
@@ -327,11 +327,6 @@ func (db *DB) loadIndexFromDataFiles() error {
 
 			// 递增 offset，下一次从新的位置开始读取
 			offset += size
-		}
-
-		// 如果是当前活跃文件，更新这个文件的 WriteOff
-		if i == len(db.fileIds)-1 {
-			db.activeFile.WriteOff = offset
 		}
 	}
 	return nil
