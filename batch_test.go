@@ -12,7 +12,7 @@ import (
 // initDBForBatch 是一个测试辅助函数，用于初始化一个 DB 实例以供测试
 func initDBForBatch(t *testing.T) *DB {
 	t.Helper()
-	opts := DefaultOptions // 使用 t.TempDir() 自动创建和清理临时目录
+	opts := DefaultOptions
 	opts.DirPath = t.TempDir()
 	db, err := Open(opts)
 	assert.Nil(t, err)
@@ -58,8 +58,8 @@ func TestDB_WriteBatch(t *testing.T) {
 	})
 
 	t.Run("Restart Persistence and SeqNo", func(t *testing.T) {
-		opts := DefaultOptions // 使用 t.TempDir() 自动创建和清理临时目录
-		opts.DirPath = t.TempDir()
+		opts := DefaultOptions
+		opts.DirPath = t.TempDir() // 使用 t.TempDir() 自动创建和清理临时目录
 		db, err := Open(opts)
 		assert.Nil(t, err)
 
@@ -120,21 +120,27 @@ func TestDB_WriteBatch(t *testing.T) {
 		err = wb.Put(utils.GetTestKey(2), utils.RandomValue(10))
 		assert.Nil(t, err)
 
-		// 提交时应该会因为超出数量而失败
+		// 提交时应该会因为超出数量而返回错误
 		err = wb.Commit()
 		assert.Equal(t, ErrExceedMaxBatchNum, err)
+
+		// 验证在提交失败后，批处理中的数据没有丢失
+		assert.Equal(t, 2, len(wb.pendingWrites))
 	})
 
 	t.Run("Last Write Wins in Batch", func(t *testing.T) {
 		db := initDBForBatch(t)
 		defer db.Close()
 
-		key1 := utils.GetTestKey(100)
-		val1 := utils.RandomValue(10)
-		key2 := utils.GetTestKey(101)
-		val2 := utils.RandomValue(10)
+		key1, val1 := utils.GetTestKey(100), utils.RandomValue(10)
+		key2, val2 := utils.GetTestKey(101), utils.RandomValue(10)
+		key3, val3_old, val3_new := utils.GetTestKey(102), utils.RandomValue(10), utils.RandomValue(10)
 
 		wb := db.NewWriteBatch(DefaultWriteBatchOptions)
+
+		// 场景1: Put -> Put (overwrite)，最终应该是新值
+		assert.Nil(t, wb.Put(key3, val3_old))
+		assert.Nil(t, wb.Put(key3, val3_new))
 
 		// 场景1: Put -> Delete，最终应该被删除
 		assert.Nil(t, wb.Put(key1, val1))
@@ -155,6 +161,11 @@ func TestDB_WriteBatch(t *testing.T) {
 		retVal, err := db.Get(key2)
 		assert.Nil(t, err)
 		assert.Equal(t, val2, retVal)
+
+		// 验证 key3 存在且值为新值
+		retVal3, err := db.Get(key3)
+		assert.Nil(t, err)
+		assert.Equal(t, val3_new, retVal3)
 	})
 
 	t.Run("Concurrent Commits", func(t *testing.T) {
