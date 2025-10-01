@@ -42,7 +42,7 @@ func (db *DB) Merge() error {
 	// 打开新的活跃文件
 	if err := db.setActiveDataFile(); err != nil {
 		db.mu.Unlock()
-		return nil
+		return err
 	}
 	// 记录最近没有参与 merge 的文件 id
 	nonMergeFileId := db.activeFile.FileId
@@ -185,7 +185,7 @@ func (db *DB) loadMergeFiles() error {
 
 	nonMergeFileId, err := db.getNonMergeFileId(mergePath)
 	if err != nil {
-		return nil
+		return err // 如果无法获取 nonMergeFileId，应该返回错误，防止数据库状态不一致
 	}
 
 	// 删除旧的数据文件
